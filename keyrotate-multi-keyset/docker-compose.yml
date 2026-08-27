@@ -1,0 +1,79 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: keyrotate
+      POSTGRES_PASSWORD: keyrotate
+      POSTGRES_DB: keyrotate
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U keyrotate -d keyrotate"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  backend:
+    build: ./backend
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://keyrotate:keyrotate@postgres:5432/keyrotate?sslmode=disable
+      SHARED_DIR: /shared
+      PORT: "8080"
+      TF_CONFIG_PATH: /tf-config/main.tf
+      # N = total keysets generated at genesis; M = how many of those
+      # N are randomly selected to actually rotate. L (0..M, how many
+      # of the M rotating keysets ALSO need an emergency renewal at
+      # genesis) is rolled fresh and randomly every batch-genesis call
+      # -- there is no env var for it by design.
+      KEYSET_COUNT: "50"
+      ROTATING_COUNT: "20"
+      ROTATION_MIN_SECONDS: "3"
+      ROTATION_MAX_SECONDS: "20"
+    volumes:
+      - shared-data:/shared
+      # Read-only mount of the actual .tf file, purely so the backend
+      # can serve its source for display in the "tf-config" UI tab --
+      # never written to, never touched by the rotation logic.
+      - ./terraform/main.tf:/tf-config/main.tf:ro
+    ports:
+      - "8080:8080"
+
+  frontend:
+    build: ./frontend
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      - "5173:80"
+
+  terraform-runner:
+    build: ./terraform
+    restart: unless-stopped
+    # Forced to root so it can reliably write into /shared regardless
+    # of which UID the base terraform image defaults to -- the backend
+    # container (also root) writes into the same volume, so both sides
+    # need matching write access.
+    user: "0:0"
+    depends_on:
+      - backend
+    environment:
+      SHARED_DIR: /shared
+      # Must be small relative to the rotation expiry range (3-20s) --
+      # see terraform/apply-loop.sh and the README's timing section.
+      POLL_SECONDS: "1"
+    volumes:
+      - shared-data:/shared
+      - tf-state:/work/state
+
+volumes:
+  pgdata:
+  shared-data:
+  tf-state:
