@@ -36,7 +36,18 @@ CREATE TABLE IF NOT EXISTS keys (
     expires_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
     material      BYTEA NOT NULL,
     status        TEXT NOT NULL CHECK (status IN ('pending', 'verified', 'primary', 'retired')),
-    verified_at   TIMESTAMPTZ
+    verified_at   TIMESTAMPTZ,
+    -- Set the instant THIS SPECIFIC key was revoked -- independent of
+    -- what happened to its keyset afterward. In auto-rotate mode, the
+    -- OLD primary key gets this set right before it's retired (its
+    -- replacement does NOT get it set -- the replacement wasn't
+    -- revoked, it's the clean new key). In halt mode, the CURRENT
+    -- primary key gets this set and then stays primary forever (no
+    -- replacement is ever created). This is what actually answers
+    -- "was this key revoked," independent of `keysets.terminated`
+    -- (which only tells you whether the KEYSET stopped rotating, not
+    -- which key, if any, was the one that got revoked).
+    revoked_at    TIMESTAMPTZ
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS one_primary_key_per_keyset ON keys (keyset_id) WHERE status = 'primary';

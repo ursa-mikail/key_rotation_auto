@@ -24,6 +24,11 @@ type KeyRecord struct {
 	ExpiresAt   time.Time  `json:"expiresAt"`
 	Status      string     `json:"status"`
 	VerifiedAt  *time.Time `json:"verifiedAt,omitempty"`
+	// RevokedAt is set the instant THIS SPECIFIC key was revoked --
+	// independent of whatever happened to its keyset afterward (kept
+	// rotating in auto-rotate mode, or permanently halted). See the
+	// matching comment on the keys table in db/init.sql.
+	RevokedAt *time.Time `json:"revokedAt,omitempty"`
 }
 
 // KeysetSummary is the per-keyset view the dashboard's overview table

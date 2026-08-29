@@ -145,17 +145,34 @@ every revoke):
 {
   "keysets": [
     {
-      "id": "unit_07_keyset",
+      "id": "unit_01_keyset",
       "type": "AES-256-GCM",
       "terminated": false,
       "lastOutcome": "revoked_rotated",
       "lastTrigger": "revoke",
-      "lastEventAt": "2026-08-27T20:14:03.881Z",
-      "keys": [ { "label": "...", "expiration": "...", "primary": true, ... } ]
+      "lastEventAt": "2026-08-29T00:24:41.907074Z",
+      "keys": [
+        { "label": "...", "expiration": "...", "status": "DISABLED", "primary": false },
+        { "label": "...", "expiration": "...", "status": "ENABLED",  "primary": true  }
+      ]
+    },
+    {
+      "id": "unit_02_keyset",
+      "type": "AES-256-GCM",
+      "terminated": true,
+      "lastOutcome": "revoked_terminated",
+      "lastTrigger": "revoke",
+      "lastEventAt": "2026-08-29T00:24:51.193517Z",
+      "keys": [
+        { "label": "...", "expiration": "...", "status": "DISABLED", "primary": true }
+      ]
     }
   ]
 }
 ```
+*(actual output captured from a real run — `unit_01` was revoked in
+auto-rotate mode and kept cycling; `unit_02` was revoked in halt mode and
+permanently stopped.)*
 
 `lastOutcome` is one of: `rotated` (ordinary, on-schedule), `revoked_rotated`
 (revoked, then emergency-rotated), `revoked_terminated` (revoked, then
@@ -166,6 +183,31 @@ keyset's `keys[].expiration` is frozen forever, and
 due-check (see the comment on that local for why this matters — without it,
 Terraform would believe a terminated keyset is perpetually "due" and keep
 firing pointless `rotate-if-due` calls forever).
+
+Each individual key entry also carries a KMS-style `status`, driven purely by
+whether **that specific key** was ever revoked (`keys.revoked_at` in
+Postgres — independent of what its keyset is doing now): `"ENABLED"` for
+every key that was never revoked, `"DISABLED"` for one that was. Concretely:
+
+- **Auto-rotate mode**: the OLD primary key gets `revoked_at` set right
+  before it's retired, so it shows `"DISABLED"` / `"primary": false` — its
+  brand-new replacement was never revoked, so it shows `"ENABLED"` /
+  `"primary": true`. A keyset can have a `DISABLED` retired key sitting
+  right next to a perfectly healthy `ENABLED` current primary, and the
+  keyset itself is never `terminated` at all.
+- **Halt mode**: the current primary key gets `revoked_at` set and then
+  stays `primary` forever (no replacement is ever created), so it shows
+  `"DISABLED"` / `"primary": true` permanently.
+
+That mapping (`keyStatusLabel()` in `backend/rotation.go`) is shared by the
+tfvars writer and the live HCL renderer, so the two views never disagree.
+This was verified end-to-end against a real Postgres instance and the real
+backend binary — not just unit logic — before release: genesis five
+keysets, revoke one in auto-rotate mode (its old key came back `DISABLED`
+in the actual `rotation.auto.tfvars.json` on disk, the new one `ENABLED`),
+flip to halt mode, revoke a second keyset (its frozen final key came back
+`DISABLED`, `terminated: true`), and confirm a third, untouched keyset
+stayed `ENABLED` throughout.
 
 ## Configuration
 

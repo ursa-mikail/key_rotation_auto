@@ -164,6 +164,15 @@ func runHaltKeyset(ctx context.Context, db *sql.DB, keysetID string) (*revokeRes
 		return nil, fmtErr("load primary key", err)
 	}
 
+	// This key stays `status = 'primary'` forever (no replacement is
+	// ever created in halt mode), but it WAS revoked -- mark that on
+	// the row itself so keyStatusLabel() can flip its tfvars/HCL
+	// status to DISABLED, same as the auto-rotate case does for the
+	// key it replaces.
+	if _, err := tx.ExecContext(ctx, `UPDATE keys SET revoked_at = now() WHERE key_id = $1`, primaryKeyID); err != nil {
+		return nil, fmtErr("mark primary key revoked", err)
+	}
+
 	rotationID, err := newUUIDv4()
 	if err != nil {
 		return nil, fmtErr("new rotation id", err)

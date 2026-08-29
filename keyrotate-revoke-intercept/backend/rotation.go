@@ -325,8 +325,24 @@ func rotateOneKeyset(ctx context.Context, db *sql.DB, keysetID, trigger string, 
 		}, nil
 	}
 
-	if _, err := tx.ExecContext(ctx, `UPDATE keys SET status = 'retired' WHERE key_id = $1`, primaryKeyID); err != nil {
-		return nil, fmtErr("retire old primary", err)
+	// A revoke-triggered rotation means THIS specific old key was the
+	// one that got revoked -- mark it here, on the key row itself, so
+	// that fact survives independent of whatever the keyset does
+	// afterward (keeps rotating normally in auto-rotate mode). A
+	// timer-triggered rotation retires the key for a completely
+	// ordinary reason -- its scheduled interval simply elapsed -- so
+	// revoked_at stays NULL for that case.
+	if trigger == "revoke" {
+		if _, err := tx.ExecContext(ctx,
+			`UPDATE keys SET status = 'retired', revoked_at = $2 WHERE key_id = $1`,
+			primaryKeyID, now,
+		); err != nil {
+			return nil, fmtErr("retire and mark revoked old primary", err)
+		}
+	} else {
+		if _, err := tx.ExecContext(ctx, `UPDATE keys SET status = 'retired' WHERE key_id = $1`, primaryKeyID); err != nil {
+			return nil, fmtErr("retire old primary", err)
+		}
 	}
 	if _, err := tx.ExecContext(ctx,
 		`UPDATE keys SET status = 'primary', verified_at = $2 WHERE key_id = $1`,
@@ -419,6 +435,22 @@ type keysetWithKeys struct {
 	LastEventAt      *time.Time
 }
 
+// keyStatusLabel is the KMS-style enabled/disabled label for one key
+// entry in the tfvars/output json and the live HCL. Driven purely by
+// whether THIS key was ever revoked (keys.revoked_at, set in
+// rotateOneKeyset for the auto-rotate case and in runHaltKeyset for
+// the halt case) -- NOT by whether its keyset is currently terminated.
+// That distinction matters: in auto-rotate mode a keyset can have a
+// revoked (DISABLED) retired key sitting right next to a perfectly
+// healthy, un-revoked (ENABLED) current primary key, and the keyset
+// itself is never terminated at all.
+func keyStatusLabel(revokedAt *time.Time) string {
+	if revokedAt != nil {
+		return "DISABLED"
+	}
+	return "ENABLED"
+}
+
 func writeTerraformVars(sharedDir string, keysets []keysetWithKeys) error {
 	if sharedDir == "" {
 		return nil
@@ -442,7 +474,7 @@ func writeTerraformVars(sharedDir string, keysets []keysetWithKeys) error {
 				Label:      k.CreatedAt.UTC().Format(time.RFC3339Nano),
 				Expiration: k.ExpiresAt.UTC().Format(time.RFC3339Nano),
 				Length:     terraformKeyBits,
-				Status:     "ENABLED",
+				Status:     keyStatusLabel(k.RevokedAt),
 				Primary:    k.Status == "primary",
 			})
 		}

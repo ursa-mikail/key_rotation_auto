@@ -78,7 +78,7 @@ func mapsEqual(a, b map[string]string) bool {
 
 func listKeys(ctx context.Context, db *sql.DB) ([]KeyRecord, error) {
 	rows, err := db.QueryContext(ctx,
-		`SELECT key_id, keyset_id, generation, parent_key_id, created_at, expires_at, status, verified_at
+		`SELECT key_id, keyset_id, generation, parent_key_id, created_at, expires_at, status, verified_at, revoked_at
 		 FROM keys ORDER BY keyset_id ASC, generation ASC`)
 	if err != nil {
 		return nil, fmtErr("query keys", err)
@@ -88,8 +88,12 @@ func listKeys(ctx context.Context, db *sql.DB) ([]KeyRecord, error) {
 	out := []KeyRecord{}
 	for rows.Next() {
 		var k KeyRecord
-		if err := rows.Scan(&k.KeyID, &k.KeysetID, &k.Generation, &k.ParentKeyID, &k.CreatedAt, &k.ExpiresAt, &k.Status, &k.VerifiedAt); err != nil {
+		var revokedAt sql.NullTime
+		if err := rows.Scan(&k.KeyID, &k.KeysetID, &k.Generation, &k.ParentKeyID, &k.CreatedAt, &k.ExpiresAt, &k.Status, &k.VerifiedAt, &revokedAt); err != nil {
 			return nil, fmtErr("scan key row", err)
+		}
+		if revokedAt.Valid {
+			k.RevokedAt = &revokedAt.Time
 		}
 		out = append(out, k)
 	}

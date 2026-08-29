@@ -40,7 +40,7 @@ func renderKeysetResourceHCL(keysets []keysetWithKeys) string {
 				fmt.Fprintf(&b, "      label      = %s\n", strconv.Quote(k.CreatedAt.UTC().Format("2006-01-02T15:04:05.000Z")))
 				fmt.Fprintf(&b, "      expiration = %s\n", strconv.Quote(k.ExpiresAt.UTC().Format("2006-01-02T15:04:05Z")))
 				fmt.Fprintf(&b, "      length     = %d\n", terraformKeyBits)
-				fmt.Fprintf(&b, "      status     = %s\n", strconv.Quote("ENABLED"))
+				fmt.Fprintf(&b, "      status     = %s\n", strconv.Quote(keyStatusLabel(k.RevokedAt)))
 				fmt.Fprintf(&b, "      primary    = %t\n", k.Status == "primary")
 				if j == len(ks.Keys)-1 {
 					b.WriteString("    }\n")
